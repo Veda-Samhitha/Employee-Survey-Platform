@@ -1,0 +1,180 @@
+// src/components/AdminDashboard.js
+
+import React, { useState, useEffect } from 'react';
+// Import only the utilities needed by the *container*
+import { getSurveys, getSurveyResults } from '../services/api'; 
+// Import new component stubs
+import SurveyManager from './SurveyManager';
+import EmployeeManager from './EmployeeManager';
+
+// --- 1. Survey Results Viewer Component (Extracted from old Dashboard) ---
+
+// We extract the results logic into its own component for clean separation
+const SurveyResultsViewer = ({ surveys, error, fetchResults, selectedSurveyId, setSelectedSurveyId, results, setError }) => {
+    
+    // Helper functions for styling (keep these here or move to a separate utility)
+    const getSentimentClass = (sentiment) => {
+        if (sentiment === 'positive') return 'sentiment-positive';
+        if (sentiment === 'negative') return 'sentiment-negative';
+        return '';
+    };
+    
+    const getRiskClass = (risk) => {
+        if (risk === 'high') return 'risk-high';
+        if (risk === 'low') return 'risk-low';
+        return '';
+    };
+
+    return (
+        <div className="content-panel">
+            <h3>View Survey Results & Analytics</h3>
+            <div className="form-group" style={{display: 'flex', gap: '15px', alignItems: 'center'}}>
+                <label htmlFor="survey-select" style={{width: '200px', margin: '0'}}>Select Survey:</label>
+                <select 
+                    id="survey-select" 
+                    value={selectedSurveyId} 
+                    onChange={(e) => setSelectedSurveyId(e.target.value)}
+                    style={{flexGrow: 1}}
+                >
+                    <option value="">-- Choose Survey --</option>
+                    {surveys.map(s => (
+                        <option key={s.id} value={s.id}>{s.title}</option>
+                    ))}
+                </select>
+                <button onClick={fetchResults} className="primary" disabled={!selectedSurveyId}>
+                    Analyze Results
+                </button>
+            </div>
+
+            {error && <p className="message error">{error}</p>}
+            
+            {results.length > 0 && (
+                <>
+                    <h4 style={{marginTop: '20px'}}>Results for Survey ID: {selectedSurveyId} ({results.length} Responses)</h4>
+                    <table className="data-table">
+                        <thead>
+                            <tr>
+                                <th>User ID</th>
+                                <th>Sentiment</th>
+                                <th>Burnout Risk</th>
+                                <th>Answers (JSON)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {results.map(r => (
+                                <tr key={r.id}>
+                                    <td>{r.user_id}</td>
+                                    <td className={getSentimentClass(r.sentiment)}>{r.sentiment || 'N/A'}</td>
+                                    <td className={getRiskClass(r.burnout_risk)}>{r.burnout_risk || 'N/A'}</td>
+                                    <td>{JSON.stringify(r.answers).substring(0, 100)}...</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </>
+            )}
+            {results.length === 0 && selectedSurveyId && !error && (
+                <p style={{marginTop: '30px'}}>No responses found for this survey.</p>
+            )}
+        </div>
+    );
+};
+
+// --- 2. Main Admin Dashboard Container Component ---
+
+const AdminDashboard = () => {
+    // State for navigation
+    const [activeView, setActiveView] = useState('results'); // Default view
+    
+    // States required for the SurveyResultsViewer
+    const [surveys, setSurveys] = useState([]);
+    const [selectedSurveyId, setSelectedSurveyId] = useState('');
+    const [results, setResults] = useState([]);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+        fetchSurveys();
+    }, []);
+
+    const fetchSurveys = async () => {
+        try {
+            const surveyList = await getSurveys();
+            setSurveys(surveyList);
+        } catch (err) {
+            setError('Failed to load surveys.');
+        }
+    };
+
+    const fetchResults = async () => {
+        if (!selectedSurveyId) return;
+        setError('');
+        setResults([]);
+        try {
+            const analysisResults = await getSurveyResults(selectedSurveyId);
+            setResults(analysisResults);
+        } catch (err) {
+            setError('Failed to fetch survey results. Check console for details.');
+        }
+    };
+
+    const renderContent = () => {
+        switch (activeView) {
+            case 'survey':
+                // SurveyManager needs access to the surveys list and refresh function
+                return <SurveyManager surveys={surveys} refreshSurveys={fetchSurveys} />; 
+            case 'employee':
+                // EmployeeManager needs access to the surveys list for assignment
+                return <EmployeeManager surveys={surveys} />;
+            case 'results':
+            default:
+                return (
+                    <SurveyResultsViewer 
+                        surveys={surveys}
+                        error={error}
+                        fetchResults={fetchResults}
+                        selectedSurveyId={selectedSurveyId}
+                        setSelectedSurveyId={setSelectedSurveyId}
+                        results={results}
+                        setError={setError}
+                    />
+                );
+        }
+    };
+
+    return (
+        <div className="admin-layout">
+            <h1 className="dashboard-title">Admin Control Panel</h1>
+            <div className="dashboard-content">
+                {/* --- Navigation Sidebar --- */}
+                <nav className="sidebar">
+                    <button 
+                        className={activeView === 'survey' ? 'active' : ''}
+                        onClick={() => setActiveView('survey')}>
+                        📋 Survey Management
+                    </button>
+                    <button 
+                        className={activeView === 'employee' ? 'active' : ''}
+                        onClick={() => setActiveView('employee')}>
+                        🧑‍💼 Employee Management
+                    </button>
+                    <button 
+                        className={activeView === 'results' ? 'active' : ''}
+                        onClick={() => setActiveView('results')}>
+                        📊 View Survey Results
+                    </button>
+                    {/* Add Logout here */}
+                    <button onClick={() => window.location.reload()}>
+                        🚪 Logout (Placeholder)
+                    </button>
+                </nav>
+
+                {/* --- Main Content Area --- */}
+                <main className="main-panel">
+                    {renderContent()}
+                </main>
+            </div>
+        </div>
+    );
+};
+
+export default AdminDashboard;
