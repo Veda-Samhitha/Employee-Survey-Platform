@@ -165,12 +165,6 @@ const AdminDashboard = () => {
                     </button>
                     
                     <div className="sidebar-separator"></div>
-
-                    <button 
-                        className="secondary-btn danger-btn logout-link" 
-                        onClick={() => { localStorage.clear(); window.location.reload(); }}>
-                        🚪 Logout
-                    </button>
                 </nav>
 
                 {/* --- MAIN CONTENT AREA --- */}

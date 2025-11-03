@@ -174,9 +174,7 @@ const AdminDashboard = () => {
                         📊 View Survey Results
                     </button>
                     {/* Placeholder for actual logout logic using clearAuth */}
-                    <button className="logout-button" onClick={() => { localStorage.clear(); window.location.reload(); }}>
-                        🚪 Logout
-                    </button>
+                    
                 </nav>
 
                 {/* --- Main Content Area --- */}
