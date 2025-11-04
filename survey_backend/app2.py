@@ -1,21 +1,21 @@
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from starlette.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, constr, field_validator,model_validator
+from pydantic import BaseModel, constr, field_validator, model_validator
 from typing import List, Optional, Dict, Annotated
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, Text
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship, Session
 from passlib.context import CryptContext
 import jwt
 import json
-import bcrypt
 from datetime import datetime, timedelta
 from perplexityai_analysis import analyze_submission
+
 # ==============================
 # CONFIGURATION
 # ==============================
 DATABASE_URL = "sqlite:///./survey_app.db"
-SECRET_KEY = "your-secret-key"  # Use a strong, random key in production
+SECRET_KEY = "your-secret-key"  # Change this in production
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
@@ -36,18 +36,6 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     role = Column(String, nullable=False)  # 'admin' or 'employee'
 
-class UserOut(BaseModel):
-    username: str
-    role: str
-
-class Employee(BaseModel):
-    id: int # Assuming employee ID is an integer
-    username: str
-    role: str
-    
-    # Allows the model to be created from SQLAlchemy objects
-    class Config:
-        from_attributes = True
 
 class Survey(Base):
     __tablename__ = "surveys"
@@ -80,7 +68,7 @@ class SurveyResponse(Base):
     user = relationship("User")
 
 
-# Create database tables
+# Create all tables
 Base.metadata.create_all(bind=engine)
 
 # ==============================
@@ -88,18 +76,34 @@ Base.metadata.create_all(bind=engine)
 # ==============================
 class UserCreate(BaseModel):
     username: str
-    password: constr(min_length=6, max_length=64)
+    password: constr(min_length=6, max_length=64)  # type: ignore[valid-type]
     role: str
-   
-    @field_validator('password')
+
+    @field_validator("password")
     @classmethod
     def validate_password_bytes(cls, v: str) -> str:
-          if len(v.encode('utf-8')) > 72:
-              raise ValueError('Password is too long (max 72 bytes)')
-          return v
+        if len(v.encode("utf-8")) > 72:
+            raise ValueError("Password is too long (max 72 bytes)")
+        return v
+
+
 class Token(BaseModel):
     access_token: str
     token_type: str
+
+
+class UserOut(BaseModel):
+    username: str
+    role: str
+
+
+class Employee(BaseModel):
+    id: int
+    username: str
+    role: str
+
+    class Config:
+        from_attributes = True
 
 
 class SurveyCreate(BaseModel):
@@ -126,7 +130,6 @@ class SurveyResponseCreate(BaseModel):
     survey_id: int
     answers: Dict[str, str]
 
-# Insert this new schema alongside your existing Pydantic Schemas
 
 class SurveyResponseOut(BaseModel):
     id: int
@@ -139,25 +142,19 @@ class SurveyResponseOut(BaseModel):
     class Config:
         from_attributes = True
 
-    @model_validator(mode='before')
+    @model_validator(mode="before")
     @classmethod
     def convert_json_fields(cls, data):
-        """Converts the JSON string fields from the DB back into Python objects."""
-        # Check if the data is an ORM object (SurveyResponse instance)
+        """Converts JSON string fields from DB into Python dicts."""
         if isinstance(data, dict):
-            # If data is already a dict (e.g., from manual construction), just return it
             return data
-            
-        if hasattr(data, 'answers') and isinstance(data.answers, str):
+        if hasattr(data, "answers") and isinstance(data.answers, str):
             try:
-                # Load the JSON string from the DB before Pydantic validates it
                 data.answers = json.loads(data.answers)
             except json.JSONDecodeError:
-                # Handle case where the JSON string is invalid
-                print(f"Error decoding JSON for answers in response ID {data.id}")
-                data.answers = {} # Set to empty dict or handle error as needed
-                
+                data.answers = {}
         return data
+
 
 class SurveyReportRow(BaseModel):
     response_id: int
@@ -165,25 +162,22 @@ class SurveyReportRow(BaseModel):
     username: str
     sentiment: Optional[str]
     burnout_risk: Optional[str]
+
+
 # ==============================
 # UTILITY FUNCTIONS
 # ==============================
 def get_password_hash(password: str) -> str:
-    print(f"Original password length: {len(password)} chars")
-    print(f"Original password bytes: {len(password.encode('utf-8'))} bytes")
-    print(f"Password content (first 50 chars): {password[:50]}")
     safe_password = password
     while len(safe_password.encode("utf-8")) > 72:
-           safe_password = safe_password[:-1]
-    print(f"Safe password length: {len(safe_password)} chars")
-    print(f"Safe password bytes: {len(safe_password.encode('utf-8'))} bytes")
+        safe_password = safe_password[:-1]
     return pwd_context.hash(safe_password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     safe_password = plain_password
     while len(safe_password.encode("utf-8")) > 72:
-           safe_password = safe_password[:-1]
+        safe_password = safe_password[:-1]
     return pwd_context.verify(safe_password, hashed_password)
 
 
@@ -205,9 +199,10 @@ def get_db():
 def get_user(db: Session, username: str):
     return db.query(User).filter(User.username == username).first()
 
+
 def get_users_by_role(db: Session, role: str):
-    """Fetches all users with a specific role."""
     return db.query(User).filter(User.role == role).all()
+
 
 def authenticate_user(db: Session, username: str, password: str):
     user = get_user(db, username)
@@ -240,23 +235,24 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
 
 
 # ==============================
-# FASTAPI APP INITIALIZATION
+# FASTAPI INITIALIZATION
 # ==============================
-app = FastAPI(title="Employee Survey System", version="1.0")
+app = FastAPI(title="Employee Survey System", version="1.1")
+
 origins = [
-    "http://localhost",       # Default for local development
-    "http://localhost:3000",  # Your React development server address
-    "http://127.0.0.1:3000",  # Another common local address    
+    "http://localhost",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
 ]
 
-# Add the CORSMiddleware to your application
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,              # List of origins permitted to make requests
-    allow_credentials=True,             # Allow cookies to be included in cross-origin requests
-    allow_methods=["*"],                # Allow all methods (GET, POST, PUT, DELETE, etc.)
-    allow_headers=["*"],                # Allow all headers (including Authorization)
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
+
 # ==============================
 # ROUTES
 # ==============================
@@ -283,25 +279,23 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
 
 
 @app.post("/surveys/", response_model=SurveyOut)
-def create_survey(survey_in: SurveyCreate,current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    # Check if role is enum
-    
-    if isinstance(current_user.role, str):
-        if current_user.role.lower() != "admin":
-            raise HTTPException(status_code=403, detail="Not authorized")
-    else:
+def create_survey(
+    survey_in: SurveyCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role.lower() != "admin":
         raise HTTPException(status_code=403, detail="Not authorized")
-    
-    import json
+
     survey = Survey(
-        title=survey_in.title, 
-        questions=json.dumps(survey_in.questions), 
-        published=False
+        title=survey_in.title,
+        questions=json.dumps(survey_in.questions),
+        published=False,
     )
     db.add(survey)
     db.commit()
     db.refresh(survey)
-    survey.questions = survey_in.questions  # Return as list
+    survey.questions = survey_in.questions
     return survey
 
 
@@ -314,7 +308,11 @@ def get_surveys(current_user: User = Depends(get_current_active_user), db: Sessi
 
 
 @app.post("/survey-assignments/")
-def assign_survey(assign_in: SurveyAssignmentCreate, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+def assign_survey(
+    assign_in: SurveyAssignmentCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
     if current_user.role.lower() != "admin":
         raise HTTPException(status_code=403, detail="Not authorized")
 
@@ -325,8 +323,7 @@ def assign_survey(assign_in: SurveyAssignmentCreate, current_user: User = Depend
     db.query(SurveyAssignment).filter(SurveyAssignment.survey_id == assign_in.survey_id).delete()
 
     for user_id in assign_in.user_ids:
-        user = db.query(User).filter(User.id == user_id).first()
-        if user:
+        if db.query(User).filter(User.id == user_id).first():
             db.add(SurveyAssignment(survey_id=assign_in.survey_id, user_id=user_id))
 
     survey.published = True
@@ -335,7 +332,11 @@ def assign_survey(assign_in: SurveyAssignmentCreate, current_user: User = Depend
 
 
 @app.post("/survey-responses/")
-def submit_response(response_in: SurveyResponseCreate, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+def submit_response(
+    response_in: SurveyResponseCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
     assignment = db.query(SurveyAssignment).filter(
         SurveyAssignment.survey_id == response_in.survey_id,
         SurveyAssignment.user_id == current_user.id
@@ -343,210 +344,140 @@ def submit_response(response_in: SurveyResponseCreate, current_user: User = Depe
 
     if not assignment:
         raise HTTPException(status_code=403, detail="User not assigned to this survey")
-    ai_results = analyze_submission(submission_id=response_in.survey_id,responses=response_in.answers)
-    if not ai_results:
-        # You can choose to raise an error or continue with defaults
-        ai_results = {
-            "sentiment": "Neutral",
-            "burnout_risk": "Low",
-            "full_analysis_json": json.dumps({"status": "AI analysis failed"})
-        }
-    print(ai_results)
+
+    ai_results = analyze_submission(
+        submission_id=response_in.survey_id,
+        responses=response_in.answers
+    )
+
+    if not ai_results or "analysis" not in ai_results:
+        sentiment = ai_results.get("sentiment", "Neutral")
+        burnout_risk = ai_results.get("burnout_risk", "Low")
+    else:
+        sentiment = ai_results["analysis"].get("emotional_tone", "Neutral")
+        burnout_risk = ai_results["analysis"].get("burnout_risk", "Low")
+
     answers_json = json.dumps(response_in.answers)
     resp = SurveyResponse(
         survey_id=response_in.survey_id,
         user_id=current_user.id,
         answers=answers_json,
-        sentiment=ai_results["analysis"]["emotional_tone"],
-        burnout_risk=ai_results["analysis"]["burnout_risk"]
+        sentiment=sentiment,
+        burnout_risk=burnout_risk
     )
     db.add(resp)
     db.commit()
     db.refresh(resp)
     return {"detail": "Response submitted successfully"}
 
+
 @app.get("/survey-responses/{survey_id}", response_model=List[SurveyResponseOut])
-def get_survey_results(survey_id: int, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    """
-    Returns all submitted responses and their AI analysis for a specific survey.
-    Only accessible by users with the 'admin' role.
-    """
-    # 1. Authorization Check (Admin Role Required)
-    if current_user.role.lower() != "admin":
-        raise HTTPException(status_code=403, detail="Not authorized. Only admins can view results.")
-
-    # 2. Query for Survey Responses
-    responses = db.query(SurveyResponse).filter(
-        SurveyResponse.survey_id == survey_id
-    ).all()
-
-    if not responses:
-        # Return an empty list if no responses are found, or a 404 if the survey ID is bad.
-        # Since the query is filtered by the ID, we'll assume an empty list is sufficient.
-        survey = db.query(Survey).filter(Survey.id == survey_id).first()
-        if not survey:
-             raise HTTPException(status_code=404, detail="Survey not found.")
-
-        return [] # Return empty list if survey exists but has no responses
-
-    # 3. Data Transformation (Handled by the Pydantic schema's model_validate logic)
-    # The SurveyResponseOut schema will automatically load the JSON string 'answers'
-    # into a dictionary before returning to the client.
-    
-    return responses
-@app.get("/users/me", response_model=UserOut) # You might need a simplified Pydantic model here
-async def read_users_me(
-    current_user: Annotated[User, Depends(get_current_active_user)]
+def get_survey_results(
+    survey_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ):
-    """
-    Retrieves the details of the currently authenticated user.
-    """
-    # The 'current_user' object already has the role field (admin or employee)
-    print(current_user)
+    if current_user.role.lower() != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized")
+    responses = db.query(SurveyResponse).filter(SurveyResponse.survey_id == survey_id).all()
+    if not responses:
+        if not db.query(Survey).filter(Survey.id == survey_id).first():
+            raise HTTPException(status_code=404, detail="Survey not found")
+        return []
+    return responses
+
+
+@app.get("/users/me", response_model=UserOut)
+async def read_users_me(current_user: Annotated[User, Depends(get_current_active_user)]):
     return current_user
 
-@app.get( # <--- Change from @router.get to @app.get
-    "/employees/", 
-    response_model=List[Employee], 
-     
-    status_code=status.HTTP_200_OK
-)
-async def read_employees(
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_active_user) 
-):
-    """
-    Retrieves a list of all registered employees (users with role 'employee') 
-    using the HTTP GET method.
-    """
-    # Assuming you have a CRUD function to filter users by role
-    employees = get_users_by_role(db=db, role="employee")
-    
-    if not employees:
-        return [] 
-        
-    return employees
-@app.get("/analysis/survey/{survey_id}/distribution")
-def get_survey_distribution(survey_id: int, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    """
-    Calculates the distribution count for sentiment and burnout risk for a survey.
-    Returns data structured for frontend charting (e.g., Pie or Bar charts).
-    """
-    if current_user.role.lower() != "admin":
-        raise HTTPException(status_code=403, detail="Not authorized.")
 
-    # Check if survey exists
+@app.get("/employees/", response_model=List[Employee])
+async def read_employees(db: Session = Depends(get_db), current_user: dict = Depends(get_current_active_user)):
+    employees = get_users_by_role(db=db, role="employee")
+    return employees or []
+
+
+@app.get("/analysis/survey/{survey_id}/distribution")
+def get_survey_distribution(
+    survey_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role.lower() != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized")
+
     survey = db.query(Survey).filter(Survey.id == survey_id).first()
     if not survey:
-        raise HTTPException(status_code=404, detail="Survey not found.")
+        raise HTTPException(status_code=404, detail="Survey not found")
 
-    # Get all responses for the survey
-    responses = db.query(SurveyResponse).filter(
-        SurveyResponse.survey_id == survey_id
-    ).all()
+    responses = db.query(SurveyResponse).filter(SurveyResponse.survey_id == survey_id).all()
 
-    if not responses:
-        return {
-            "sentiment_distribution": [],
-            "burnout_risk_distribution": [],
-            "total_responses": 0
-        }
-
-    # Calculate distributions
-    sentiment_counts = {}
-    burnout_risk_counts = {}
-    
-    for resp in responses:
-        # Sentiment distribution
-        sentiment = resp.sentiment or "Unknown"
+    sentiment_counts, burnout_counts = {}, {}
+    for r in responses:
+        sentiment = r.sentiment or "Unknown"
+        burnout = r.burnout_risk or "Unknown"
         sentiment_counts[sentiment] = sentiment_counts.get(sentiment, 0) + 1
-        
-        # Burnout risk distribution
-        burnout_risk = resp.burnout_risk or "Unknown"
-        burnout_risk_counts[burnout_risk] = burnout_risk_counts.get(burnout_risk, 0) + 1
-
-    # Convert counts to a list of dicts suitable for chart libraries (optional but useful)
-    sentiment_data = [{"label": k, "value": v} for k, v in sentiment_counts.items()]
-    burnout_risk_data = [{"label": k, "value": v} for k, v in burnout_risk_counts.items()]
+        burnout_counts[burnout] = burnout_counts.get(burnout, 0) + 1
 
     return {
-        "sentiment_distribution": sentiment_data,
-        "burnout_risk_distribution": burnout_risk_data,
-        "total_responses": len(responses)
+        "sentiment_distribution": [{"label": k, "value": v} for k, v in sentiment_counts.items()],
+        "burnout_risk_distribution": [{"label": k, "value": v} for k, v in burnout_counts.items()],
+        "total_responses": len(responses),
     }
 
+
 @app.get("/analysis/survey/{survey_id}/text-data")
-def get_survey_text_data(survey_id: int, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    """
-    Aggregates all text-based answers into a single string for further analysis 
-    (e.g., Word Cloud generation) on the frontend.
-    """
+def get_survey_text_data(
+    survey_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
     if current_user.role.lower() != "admin":
-        raise HTTPException(status_code=403, detail="Not authorized.")
+        raise HTTPException(status_code=403, detail="Not authorized")
 
-    responses = db.query(SurveyResponse).filter(
-        SurveyResponse.survey_id == survey_id
-    ).all()
-
+    responses = db.query(SurveyResponse).filter(SurveyResponse.survey_id == survey_id).all()
     if not responses:
-        survey = db.query(Survey).filter(Survey.id == survey_id).first()
-        if not survey:
-            raise HTTPException(status_code=404, detail="Survey not found.")
+        if not db.query(Survey).filter(Survey.id == survey_id).first():
+            raise HTTPException(status_code=404, detail="Survey not found")
         return {"all_answers_text": ""}
 
-    all_answers_list = []
+    text_list = []
     for resp in responses:
-        # Answers are stored as a JSON string
         try:
-            answers_dict = json.loads(resp.answers) # Load the raw JSON string
-            # Concatenate all string values (the answers) from the dictionary
-            # Note: This assumes all dictionary values are text answers.
-            all_answers_list.extend(
-                str(v) for v in answers_dict.values() if isinstance(v, str)
-            )
+            answers = json.loads(resp.answers)
+            text_list.extend(str(v) for v in answers.values() if isinstance(v, str))
         except json.JSONDecodeError:
-            # Handle cases where the stored answers JSON is malformed
-            print(f"Skipping bad JSON for response ID {resp.id}")
             continue
 
-    # Join all text into one large string, separated by spaces
-    all_answers_text = " ".join(all_answers_list)
+    return {"all_answers_text": " ".join(text_list)}
 
-    return {"all_answers_text": all_answers_text}
 
 @app.get("/analysis/survey/{survey_id}/report-table", response_model=List[SurveyReportRow])
-def get_survey_report_table(survey_id: int, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    """
-    Generates a table report of user-level metrics for admin review.
-    NOTE: This requires a JOIN operation in SQLAlchemy.
-    """
+def get_survey_report_table(
+    survey_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
     if current_user.role.lower() != "admin":
-        raise HTTPException(status_code=403, detail="Not authorized.")
+        raise HTTPException(status_code=403, detail="Not authorized")
 
-    # Query responses and join with User to get the username
-    results = db.query(SurveyResponse, User.username).join(
-        User, SurveyResponse.user_id == User.id
-    ).filter(
+    results = db.query(SurveyResponse, User.username).join(User, SurveyResponse.user_id == User.id).filter(
         SurveyResponse.survey_id == survey_id
     ).all()
 
     if not results:
-        survey = db.query(Survey).filter(Survey.id == survey_id).first()
-        if not survey:
-            raise HTTPException(status_code=404, detail="Survey not found.")
+        if not db.query(Survey).filter(Survey.id == survey_id).first():
+            raise HTTPException(status_code=404, detail="Survey not found")
         return []
 
-    report_data = []
-    for resp, username in results:
-        report_data.append(SurveyReportRow(
-            response_id=resp.id,
-            user_id=resp.user_id,
+    return [
+        SurveyReportRow(
+            response_id=r.id,
+            user_id=r.user_id,
             username=username,
-            sentiment=resp.sentiment,
-            burnout_risk=resp.burnout_risk
-        ))
-
-    return report_data
-# ==============================
-# END OF FILE
-# ==============================
+            sentiment=r.sentiment,
+            burnout_risk=r.burnout_risk
+        )
+        for r, username in results
+    ]

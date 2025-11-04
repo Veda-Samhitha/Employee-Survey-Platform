@@ -1,8 +1,11 @@
-// Base URL for the FastAPI backend
-const API_BASE_URL = "http://localhost:8000";
+// ==============================================
+// CONFIGURATION
+// ==============================================
 
-// --- Token Management ---
-// Simple token storage in localStorage
+// Base URL for the FastAPI backend
+const API_BASE_URL = "http://127.0.0.1:8000"; // safer than localhost for CORS consistency
+
+// --- Token & Role Management ---
 const getToken = () => localStorage.getItem("userToken");
 const setToken = (token) => localStorage.setItem("userToken", token);
 
@@ -14,172 +17,183 @@ const clearAuth = () => {
   localStorage.removeItem("userRole");
 };
 
-export const handleResponse = async (response) => {
-    if (!response.ok) {
-        // Attempt to read error message from body
-        const errorBody = await response.json().catch(() => ({ detail: 'Unknown API error' }));
-        
-        // --- CRUCIAL CHECK & FORMATTING ---
-        // 1. Check if 'detail' is an array (which happens with FastAPI/Pydantic 422 errors)
-        if (Array.isArray(errorBody.detail)) {
-            // Map the array of error objects into a single, readable string
-            const formattedError = errorBody.detail
-                // Each error object has 'loc' (location/field) and 'msg' (message)
-                .map(err => `${err.loc.join('.')}: ${err.msg}`)
-                .join('; '); // Join them with a semicolon for readability
-            
-            throw new Error(formattedError);
-        }
+// ==============================================
+// COMMON HELPERS
+// ==============================================
 
-        // 2. Handle simple string errors (e.g., 401 Unauthorized, 404 Not Found)
-        // If errorBody.detail is a string, use it.
-        const errorMessage = errorBody.detail || 'API request failed with unknown status.';
-        throw new Error(errorMessage);
+// Auth header helper
+const getAuthHeaders = () => ({
+  "Content-Type": "application/json",
+  "Authorization": `Bearer ${getToken()}`,
+});
+
+// Universal response handler for API responses
+export const handleResponse = async (response) => {
+  if (!response.ok) {
+    // Try to parse backend JSON error
+    const errorBody = await response.json().catch(() => ({
+      detail: "Unknown API error",
+    }));
+
+    // FastAPI/Pydantic 422 validation errors come as arrays
+    if (Array.isArray(errorBody.detail)) {
+      const formattedError = errorBody.detail
+        .map((err) => `${err.loc.join(".")}: ${err.msg}`)
+        .join("; ");
+      throw new Error(formattedError);
     }
-    return response.json();
+
+    // Handle normal detail messages (401, 403, 404, etc.)
+    const errorMessage = errorBody.detail || "API request failed.";
+    throw new Error(errorMessage);
+  }
+
+  // If response is okay, return JSON
+  return response.json();
 };
 
-// --- AUTHENTICATION & USERS ---
+// Safe fetch wrapper (prevents "Failed to fetch" from crashing)
+export const safeFetch = async (url, options = {}) => {
+  try {
+    const response = await fetch(url, options);
+    return await handleResponse(response);
+  } catch (err) {
+    throw new Error(`Network error or server unreachable: ${err.message}`);
+  }
+};
+
+// ==============================================
+// AUTHENTICATION & USERS
+// ==============================================
 
 /**
- * Endpoint: POST /users/
- * Creates a new user (usually done by an admin or a separate setup process).
+ * POST /users/
+ * Creates a new user (used for registration or admin setup).
  */
 export const registerUser = async (username, password, role) => {
-  const response = await fetch(`${API_BASE_URL}/users/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+  return safeFetch(`${API_BASE_URL}/users/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password, role }),
   });
-  return handleResponse(response);
 };
 
-
 /**
- * Endpoint: POST /token
+ * POST /token
  * Logs in a user and retrieves an access token.
  */
 export const loginUser = async (username, password) => {
-  // FastAPI expects form-urlencoded data for /token
   const formData = new URLSearchParams();
-  formData.append('username', username);
-  formData.append('password', password);
+  formData.append("username", username);
+  formData.append("password", password);
 
-  const response = await fetch(`${API_BASE_URL}/token`, {
-    method: 'POST',
-    headers: { 
-      'Content-Type': 'application/x-www-form-urlencoded' // Crucial header for FastAPI /token
+  const response = await safeFetch(`${API_BASE_URL}/token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
     },
     body: formData.toString(),
   });
-  
-  const data = await handleResponse(response);
-  setToken(data.access_token);
-  
-  // NOTE: The role must be inferred or retrieved separately, 
-  // as the /token endpoint doesn't return it by default. 
-  // For simplicity, we'll return a placeholder role which should be updated 
-  // by a subsequent API call in a real app. 
-  // Based on your App.js logic, we assume the caller determines the role after login.
-  return data; 
+
+  // Save token in local storage
+  setToken(response.access_token);
+  return response;
 };
-
-export const fetchUserRole = async () => {
-    const response = await fetch(`${API_BASE_URL}/users/me`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
-    });
-    const userDetails = await handleResponse(response);
-    
-    // Save the role to localStorage immediately for use by other parts of the app
-    if (userDetails.role) {
-        setUserRole(userDetails.role);
-    }
-    
-    return userDetails;
-};
-export { clearAuth, getUserRole};
-
-
-// --- SURVEY MANAGEMENT ---
-
-const getAuthHeaders = () => ({
-  'Content-Type': 'application/json',
-  'Authorization': `Bearer ${getToken()}`,
-});
 
 /**
- * Endpoint: GET /surveys/
- * Retrieves a list of all surveys.
+ * GET /users/me
+ * Fetch the current user's details (including role).
  */
-export const getSurveys = async () => {
-  const response = await fetch(`${API_BASE_URL}/surveys/`, {
-    method: 'GET',
+export const fetchUserRole = async () => {
+  const userDetails = await safeFetch(`${API_BASE_URL}/users/me`, {
+    method: "GET",
     headers: getAuthHeaders(),
   });
-  return handleResponse(response);
+
+  if (userDetails.role) setUserRole(userDetails.role);
+  return userDetails;
+};
+
+// Export auth helpers
+export { clearAuth, getUserRole };
+
+// ==============================================
+// SURVEY MANAGEMENT
+// ==============================================
+
+/**
+ * GET /surveys/
+ * Retrieve all surveys (available for user/admin).
+ */
+export const getSurveys = async () => {
+  return safeFetch(`${API_BASE_URL}/surveys/`, {
+    method: "GET",
+    headers: getAuthHeaders(),
+  });
 };
 
 /**
- * Endpoint: POST /surveys/
- * Creates a new survey (Admin only).
+ * POST /surveys/
+ * Create a new survey (Admin only).
  */
 export const createSurvey = async (title, questions) => {
-  const response = await fetch(`${API_BASE_URL}/surveys/`, {
-    method: 'POST',
+  return safeFetch(`${API_BASE_URL}/surveys/`, {
+    method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify({ title, questions }),
   });
-  return handleResponse(response);
 };
 
 /**
- * Endpoint: POST /survey-assignments/
- * Assigns a survey to a list of user IDs (Admin only).
+ * POST /survey-assignments/
+ * Assign a survey to employees (Admin only).
  */
 export const assignSurvey = async (surveyId, userIds) => {
-  const response = await fetch(`${API_BASE_URL}/survey-assignments/`, {
-    method: 'POST',
+  return safeFetch(`${API_BASE_URL}/survey-assignments/`, {
+    method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify({ survey_id: surveyId, user_ids: userIds }),
   });
-  return handleResponse(response);
 };
 
-
-// --- SURVEY RESPONSES ---
+// ==============================================
+// SURVEY RESPONSES
+// ==============================================
 
 /**
- * Endpoint: POST /survey-responses/
- * Submits an employee's survey response.
+ * POST /survey-responses/
+ * Submit a survey response (Employee).
  */
 export const submitResponse = async (surveyId, answers) => {
-  const response = await fetch(`${API_BASE_URL}/survey-responses/`, {
-    method: 'POST',
+  return safeFetch(`${API_BASE_URL}/survey-responses/`, {
+    method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify({ survey_id: surveyId, answers }),
   });
-  return handleResponse(response);
 };
 
 /**
- * Endpoint: GET /survey-responses/{survey_id}
- * Retrieves all submitted responses for a specific survey (Admin only).
+ * GET /survey-responses/{survey_id}
+ * Retrieve all responses for a given survey (Admin only).
  */
 export const getSurveyResults = async (surveyId) => {
-  const response = await fetch(`${API_BASE_URL}/survey-responses/${surveyId}`, {
-    method: 'GET',
+  return safeFetch(`${API_BASE_URL}/survey-responses/${surveyId}`, {
+    method: "GET",
     headers: getAuthHeaders(),
   });
-  return handleResponse(response);
 };
 
+// ==============================================
+// EMPLOYEES
+// ==============================================
+
+/**
+ * GET /employees/
+ * Fetch all registered employees (Admin only).
+ */
 export const fetchAllEmployees = async () => {
-    const response = await fetch(`${API_BASE_URL}/employees/`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
-    });
-    
-    // Use the existing handleResponse for error parsing
-    return handleResponse(response);
+  return safeFetch(`${API_BASE_URL}/employees/`, {
+    method: "GET",
+    headers: getAuthHeaders(),
+  });
 };
