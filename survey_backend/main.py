@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base, relationship, Session
 from passlib.context import CryptContext
 import jwt
 import json
+from pydantic import constr
 from datetime import datetime, timedelta
 from perplexityai_analysis import analyze_submission
 
@@ -76,7 +77,7 @@ Base.metadata.create_all(bind=engine)
 # ==============================
 class UserCreate(BaseModel):
     username: str
-    password: constr(min_length=6, max_length=64)  # type: ignore[valid-type]
+    password: Annotated[str, constr(min_length=6, max_length=64)]
     role: str
 
     @field_validator("password")
@@ -145,7 +146,6 @@ class SurveyResponseOut(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def convert_json_fields(cls, data):
-        """Converts JSON string fields from DB into Python dicts."""
         if isinstance(data, dict):
             return data
         if hasattr(data, "answers") and isinstance(data.answers, str):
@@ -239,7 +239,11 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
 # ==============================
 app = FastAPI(title="Employee Survey System", version="1.1")
 
+# ==============================
+# CORS CONFIGURATION (UPDATED)
+# ==============================
 origins = [
+    "https://employee-survey-platform.vercel.app",
     "http://localhost",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -256,6 +260,11 @@ app.add_middleware(
 # ==============================
 # ROUTES
 # ==============================
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "time": datetime.utcnow().isoformat()}
+
+
 @app.post("/users/", status_code=201)
 def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
     existing_user = get_user(db, user_in.username)
