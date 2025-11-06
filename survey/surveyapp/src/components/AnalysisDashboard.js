@@ -6,7 +6,7 @@ import AreaChart from './Charts/AreaChart';
 import BarChart from './Charts/BarChart';
 import PieChart from './Charts/PieChart';
 
-const API_BASE_URL = 'http://localhost:8000'; // Your FastAPI backend URL
+const API_BASE_URL = 'http://process.env.REACT_APP_API_BASE_URL:8000'; // Your FastAPI backend URL
 
 const AnalysisDashboard = ({ surveyId }) => {
   const [sentimentData, setSentimentData] = useState({ labels: [], data: [] });

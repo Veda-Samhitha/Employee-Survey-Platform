@@ -3,7 +3,7 @@
 // ==============================================
 
 // Base URL for the FastAPI backend
-const API_BASE_URL = "http://127.0.0.1:8000"; // safer than localhost for CORS consistency
+const API_BASE_URL = "http://process.env.REACT_APP_API_BASE_URL.0.0.1:8000"; // safer than localhost for CORS consistency
 
 // --- Token & Role Management ---
 const getToken = () => localStorage.getItem("userToken");
