@@ -10,6 +10,6 @@ python-multipart
 numpy
 sqlalchemy
 PyJWT
-passlib[bcrypt]
-bcrypt
+bcrypt==4.0.1
+passlib==1.7.4
 uvicorn[standard]
